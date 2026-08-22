@@ -1,4 +1,4 @@
-# Plan — Face Recognition Attendance System
+# Plan — 
 
 ## What It Does
 
