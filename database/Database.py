@@ -109,12 +109,22 @@ def delete_admin(username):
 
 def create_attendance(student_id, status):
     cursor.execute(
-        "SELECT id FROM attendance WHERE student_id = %s AND DATE(timestamp) = CURDATE()",
+        "SELECT id, status FROM attendance WHERE student_id = %s AND DATE(timestamp) = CURDATE()",
         (student_id,)
     )
-    if cursor.fetchone():
-        print(f"Student {student_id} already marked today. Skipping...")
-        return None
+    existing = cursor.fetchone()
+    if existing:
+        attendance_id, current_status = existing
+        if current_status == "present":
+            print(f"Student {student_id} is already marked present today. Skipping...")
+            return None
+
+        cursor.execute(
+            "UPDATE attendance SET status = %s WHERE id = %s",
+            (status, attendance_id)
+        )
+        conn.commit()
+        return attendance_id
 
     cursor.execute(
         "INSERT INTO attendance (student_id, timestamp, status) VALUES (%s, NOW(), %s)",
@@ -122,6 +132,47 @@ def create_attendance(student_id, status):
     )
     conn.commit()
     return cursor.lastrowid
+
+
+def start_attendance_session():
+    """Start a session and create today's default absent rows for all students."""
+    try:
+        cursor.execute(
+            "SELECT id FROM attendance_sessions WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1"
+        )
+        active = cursor.fetchone()
+        if active:
+            return active[0]
+
+        cursor.execute(
+            "INSERT INTO attendance_sessions (started_at, ended_at) VALUES (NOW(), NULL)"
+        )
+        session_id = cursor.lastrowid
+        cursor.execute(
+            "INSERT IGNORE INTO attendance (student_id, timestamp, status) "
+            "SELECT id, NOW(), 'absent' FROM students"
+        )
+        conn.commit()
+        return session_id
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def end_attendance_session():
+    cursor.execute(
+        "UPDATE attendance_sessions SET ended_at = NOW() "
+        "WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1"
+    )
+    conn.commit()
+    return cursor.rowcount
+
+
+def is_attendance_session_active():
+    cursor.execute(
+        "SELECT id FROM attendance_sessions WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1"
+    )
+    return cursor.fetchone() is not None
 
 
 def read_attendance(student_id):

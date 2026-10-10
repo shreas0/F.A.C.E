@@ -44,6 +44,9 @@ def load_registered_students():
         return []
 
 def process_image(file_path):
+    if not Database.is_attendance_session_active():
+        print("[SESSION] No active attendance session; skipping image.")
+        return True
     time.sleep(0.3)
     try:
         emb_objs = DeepFace.represent(img_path=file_path, model_name="Facenet", enforce_detection=False)
@@ -72,7 +75,7 @@ def process_image(file_path):
         if att_id:
             print(f"[ATTENDANCE] Marked {name} (ID: {student_id}) as 'present' in Database (Record ID: {att_id})")
         else:
-            print(f"[DUPLICATE] {name} (ID: {student_id}) attendance was already marked for today.")
+            print(f"[DUPLICATE] {name} (ID: {student_id}) is already marked present today.")
     else:
         print(f"[UNKNOWN] Face not recognized (Best Distance: {min_dist:.2f})")
 
@@ -94,6 +97,8 @@ if __name__ == "__main__":
                     if os.path.splitext(fname)[1].lower() in valid_exts:
                         fpath = os.path.join(folder, fname)
                         if os.path.isfile(fpath):
+                            if not Database.is_attendance_session_active():
+                                break
                             print(f"\nNew file detected: {fname}")
                             if process_image(fpath):
                                 try:

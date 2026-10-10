@@ -1,9 +1,11 @@
 CREATE DATABASE IF NOT EXISTS facial_attendance;
+USE facial_attendance;
 DROP TABLE IF exists admins;
+DROP TABLE IF EXISTS attendance_sessions;
 DROP TABLE IF EXISTS attendance;
 DROP TABLE IF EXISTS students;
 
-USE facial_attendance;
+
 -- ---------------------------------------------------------------------
 -- Table: admins
 -- ---------------------------------------------------------------------
@@ -32,11 +34,17 @@ CREATE TABLE IF NOT EXISTS attendance (
     student_id        INT NOT NULL,
     timestamp         DATETIME NOT NULL,
     attendance_date   DATE GENERATED ALWAYS AS (DATE(timestamp)) STORED,
-    status            ENUM('present', 'failed') NOT NULL DEFAULT 'present',
+    status            ENUM('absent', 'present', 'failed') NOT NULL DEFAULT 'absent',
     CONSTRAINT fk_attendance_student
         FOREIGN KEY (student_id) REFERENCES students(id)
         ON DELETE CASCADE,
 
     CONSTRAINT uq_student_per_day
         UNIQUE (student_id, attendance_date)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS attendance_sessions (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    started_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ended_at    DATETIME NULL
 ) ENGINE=InnoDB;
