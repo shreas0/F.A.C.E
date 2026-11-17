@@ -2,15 +2,17 @@ import os
 import sys
 import time
 import json
+import threading
 import numpy as np
 from deepface import DeepFace
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from database import Database
 
-WATCH_FOLDERS = ["attending_face", "attending_faces"]
+WATCH_FOLDERS = ["attending_face"]
 SIMILARITY_THRESHOLD = 0.40
 POLL_INTERVAL = 1
+_recognition_lock = threading.Lock()
 
 for f in WATCH_FOLDERS:
     os.makedirs(f, exist_ok=True)
@@ -44,42 +46,61 @@ def load_registered_students():
         return []
 
 def process_image(file_path):
-    if not Database.is_attendance_session_active():
-        print("[SESSION] No active attendance session; skipping image.")
-        return True
-    time.sleep(0.3)
-    try:
-        emb_objs = DeepFace.represent(img_path=file_path, model_name="Facenet", enforce_detection=False)
-        new_emb = emb_objs[0]["embedding"]
-    except Exception as e:
-        print(f"[ERROR] Could not scan face in {os.path.basename(file_path)}: {e}")
-        return True
+    """Recognize the uploaded image and return an OLED-safe attendance result."""
+    result = {"status": "not_marked", "name": "", "reason": "recognition_error"}
+    # DeepFace and Database use process-wide resources; serialize requests.
+    with _recognition_lock:
+        try:
+            emb_objs = DeepFace.represent(
+                img_path=file_path, model_name="Facenet", enforce_detection=True
+            )
+            if not emb_objs:
+                result["reason"] = "no_face"
+                return result
+            new_emb = emb_objs[0]["embedding"]
+        except Exception as e:
+            print(f"[ERROR] Could not scan face in {os.path.basename(file_path)}: {e}")
+            result["reason"] = "no_face"
+            return result
 
-    students = load_registered_students()
-    if not students:
-        print("[WARNING] No registered students found in database.")
-        return True
+        students = load_registered_students()
+        if not students:
+            result["reason"] = "no_students"
+            return result
+        try:
+            dists = [cosine_dist(new_emb, s["encoding"]) for s in students]
+            idx = int(np.argmin(dists))
+            min_dist = float(dists[idx])
+        except Exception as e:
+            print(f"[ERROR] Invalid student face encoding: {e}")
+            result["reason"] = "database_error"
+            return result
+        if min_dist > SIMILARITY_THRESHOLD:
+            print(f"[UNKNOWN] Face not recognized (Best Distance: {min_dist:.2f})")
+            result["reason"] = "unknown"
+            return result
 
-    dists = [cosine_dist(new_emb, s["encoding"]) for s in students]
-    min_dist = min(dists)
-
-    if min_dist <= SIMILARITY_THRESHOLD:
-        idx = dists.index(min_dist)
         matched = students[idx]
-        student_id = matched["id"]
-        name = matched["name"]
-
+        student_id, name = matched["id"], str(matched["name"])
+        result.update({"name": name, "reason": "session_inactive"})
         print(f"[RECOGNIZED] Matched: {name} (Student ID: {student_id}, Distance: {min_dist:.2f})")
-
-        att_id = Database.create_attendance(student_id, "present")
-        if att_id:
-            print(f"[ATTENDANCE] Marked {name} (ID: {student_id}) as 'present' in Database (Record ID: {att_id})")
-        else:
-            print(f"[DUPLICATE] {name} (ID: {student_id}) is already marked present today.")
-    else:
-        print(f"[UNKNOWN] Face not recognized (Best Distance: {min_dist:.2f})")
-
-    return True
+        try:
+            if not Database.is_attendance_session_active():
+                print("[SESSION] No active attendance session; attendance not marked.")
+                return result
+            att_id = Database.create_attendance(student_id, "present")
+            if att_id:
+                result.update({"status": "marked", "reason": ""})
+                print(f"[ATTENDANCE] Marked {name} present (Record ID: {att_id})")
+            elif Database.get_today_attendance_status(student_id) == "present":
+                result.update({"status": "already_marked", "reason": ""})
+                print(f"[DUPLICATE] {name} is already marked present today.")
+            else:
+                result["reason"] = "database_error"
+        except Exception as e:
+            print(f"[ERROR] Attendance database operation failed: {e}")
+            result["reason"] = "database_error"
+        return result
 
 if __name__ == "__main__":
     students = load_registered_students()

@@ -38,4 +38,11 @@ backend/captured_faces/
 backend/captured_face/
 backend/attending_face/
 backend/attending_faces/
+esp-32/tools/facecam_qvga_preview.jpg
 *.csv
+!esp-32/partitions.csv
+node_modules/
+*.log
+*.db
+*.sqlite
+*.sqlite3

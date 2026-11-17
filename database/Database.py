@@ -20,6 +20,16 @@ def create_student(name, face_encoding):
     )
     conn.commit()
     if cursor.rowcount == 0:
+        cursor.execute("SELECT id, face_encoding FROM students WHERE name = %s", (name,))
+        existing = cursor.fetchone()
+        if existing and existing[1] in (None, "[]", "null", []):
+            cursor.execute(
+                "UPDATE students SET face_encoding = %s WHERE id = %s",
+                (face_encoding, existing[0])
+            )
+            conn.commit()
+            print(f"Added face data to the existing student {name}.")
+            return existing[0]
         print(f"{name} already exists. Skipping...")
         return None
     return cursor.lastrowid
@@ -30,12 +40,19 @@ def get_student(student_id):
         "SELECT * FROM students WHERE id = %s",
         (student_id,)
     )
-    return cursor.fetchone()
+    student = cursor.fetchone()
+    # End the read transaction so this long-running API connection sees
+    # registrations committed by the separate registration process.
+    conn.commit()
+    return student
 
 
 def read_all_students():
     cursor.execute("SELECT * FROM students")
-    return cursor.fetchall()
+    students = cursor.fetchall()
+    # Finish the read transaction so later session checks see recent admin actions.
+    conn.commit()
+    return students
 
 
 def update_student_name(student_id, new_name):
@@ -77,7 +94,9 @@ def read_admin(username):
         "SELECT * FROM admins WHERE username = %s",
         (username,)
     )
-    return cursor.fetchone()
+    admin = cursor.fetchone()
+    conn.commit()
+    return admin
 
 
 def read_all_admins():
@@ -132,6 +151,16 @@ def create_attendance(student_id, status):
     )
     conn.commit()
     return cursor.lastrowid
+
+
+def get_today_attendance_status(student_id):
+    cursor.execute(
+        "SELECT status FROM attendance WHERE student_id = %s AND DATE(timestamp) = CURDATE()",
+        (student_id,)
+    )
+    row = cursor.fetchone()
+    conn.commit()
+    return row[0] if row else None
 
 
 def start_attendance_session():
