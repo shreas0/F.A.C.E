@@ -1,0 +1,292 @@
+/* ===================================================================
+   F.A.C.E  –  Authentication UI (Auth.css)
+   Clean, structured, centered card layout · Earthy warm palette
+   =================================================================== */
+
+.auth-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: calc(100vh - 180px);
+  padding: 30px 16px;
+  box-sizing: border-box;
+}
+
+.auth-card-centered {
+  width: 100%;
+  max-width: 440px;
+  margin: 0 auto;
+  padding: 36px 32px;
+  background: var(--papaya-whip);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 4px 20px rgba(53, 57, 47, 0.08);
+  box-sizing: border-box;
+}
+
+.auth-header {
+  margin-bottom: 24px;
+  text-align: left;
+}
+
+.auth-header h1 {
+  margin: 0 0 8px 0;
+  font-size: 1.65rem;
+  font-weight: 750;
+  letter-spacing: -0.025em;
+  color: var(--ink);
+}
+
+.auth-header p {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: var(--muted-ink);
+}
+
+.auth-form-clean {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.form-group label {
+  font-size: 0.88rem;
+  font-weight: 650;
+  color: var(--ink);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.form-input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px solid #c0c4aa;
+  border-radius: 8px;
+  background: var(--cornsilk);
+  color: var(--ink);
+  font-size: 0.95rem;
+  box-sizing: border-box;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.form-input:hover {
+  border-color: #a8ad8e;
+}
+
+.form-input:focus {
+  border-color: var(--light-bronze);
+  background: #fffdf5;
+  box-shadow: 0 0 0 3px rgba(212, 163, 115, 0.22);
+  outline: none;
+}
+
+/* Password field with inside toggle */
+.password-input-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.password-input-container input {
+  padding-right: 68px;
+}
+
+.password-toggle-text {
+  position: absolute;
+  right: 10px;
+  background: transparent;
+  border: none;
+  color: var(--muted-ink);
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 4px;
+  min-height: auto;
+}
+
+.password-toggle-text:hover {
+  background: rgba(204, 213, 174, 0.5);
+  color: var(--ink);
+  transform: none;
+  box-shadow: none;
+  border-color: transparent;
+}
+
+/* Dynamic Identity Preview Badge */
+.unified-id-preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  background: var(--beige);
+  border: 1px solid #d4d8b9;
+  border-radius: 8px;
+  font-size: 0.86rem;
+  box-sizing: border-box;
+}
+
+.unified-id-preview span {
+  color: var(--muted-ink);
+}
+
+.unified-id-preview strong {
+  color: #2b3a1a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.92rem;
+}
+
+/* Row with Remember me and Forgot password */
+.form-options-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.88rem;
+  color: var(--muted-ink);
+  margin-top: -2px;
+}
+
+.remember-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.remember-checkbox input[type="checkbox"] {
+  width: 16px;
+  min-height: 16px;
+  margin: 0;
+  accent-color: #65704e;
+}
+
+.forgot-password-link {
+  color: #7a5c38;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.forgot-password-link:hover {
+  color: #4a341b;
+  text-decoration: underline;
+}
+
+/* Primary Submit Button */
+.auth-submit-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 46px;
+  margin-top: 6px;
+  padding: 12px 20px;
+  border: 1px solid #b98d5e;
+  border-radius: 8px;
+  background: var(--light-bronze);
+  color: #2b2216;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(185, 141, 94, 0.25);
+  transition: all 160ms ease;
+  box-sizing: border-box;
+}
+
+.auth-submit-button:hover:not(:disabled) {
+  background: #e0b486;
+  border-color: #c59b6b;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(185, 141, 94, 0.35);
+}
+
+.auth-submit-button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+/* In-flow feedback banner */
+.auth-feedback-banner {
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  box-sizing: border-box;
+}
+
+.auth-feedback-banner.error {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #f87171;
+}
+
+.auth-feedback-banner.success {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #86efac;
+}
+
+/* Test account helper card */
+.auth-test-helper {
+  margin-top: 20px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--cornsilk);
+  border: 1px dashed var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.82rem;
+  color: var(--muted-ink);
+  box-sizing: border-box;
+}
+
+.auth-test-helper strong {
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.auth-test-helper button {
+  padding: 5px 10px;
+  font-size: 0.78rem;
+  font-weight: 650;
+  border-radius: 6px;
+  background: var(--tea-green);
+  border: 1px solid #b3be90;
+  color: var(--ink);
+  cursor: pointer;
+  min-height: auto;
+}
+
+.auth-test-helper button:hover {
+  background: #beca99;
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+  .auth-card-centered {
+    padding: 24px 20px;
+    border-radius: 12px;
+  }
+  .auth-header h1 {
+    font-size: 1.45rem;
+  }
+}

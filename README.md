@@ -68,17 +68,24 @@ The first version will intentionally remain simple so that the complete pipeline
 - **ESP32 Communication:** No push notification system will be implemented. The OLED simply displays the response received from Flask.
 - **Liveness / Anti-Proxy Detection:** Blink or iris-based detection will be considered later once the required hardware is available.
 
-## Out of MVP Scope
+## Access by Role
 
-The following features are not part of the initial implementation:
+| Role | Access |
+|---|---|
+| Admin | Manage users, enrollment, face registration, attendance sessions, records, holidays, leave reviews, and notifications |
+| HOD | School-wide attendance and student oversight, sessions, enrollment, holidays, leave reviews, and notifications |
+| Teacher | Attendance and leave review for the teacher's assigned class |
+| Staff | Daily attendance, enrollment, session controls, student lists, and notifications |
+| Reviewer | View attendance and review leave requests |
+| Student | View their own attendance and notifications, and request leave |
+| Parent | View the linked student's attendance and notifications, and request leave |
 
-- Role-based access control
-- Bulk enrollment
-- Leave requests
-- Holiday calendar
-- Notifications
-- Forgot password
-- Encryption
+API permissions are enforced on the server; frontend route guards are only a second
+layer. Teacher accounts must have an assigned class. HOD access is school-wide
+because the current schema has no separate department table.
+
+Face liveness checks and encryption of stored face embeddings remain out of the
+current build. The camera uses face recognition and daily duplicate prevention.
 
 These features will be documented as possible future improvements in the project report rather than being implemented during the MVP.
 
@@ -87,5 +94,39 @@ These features will be documented as possible future improvements in the project
 The main goal is to create a working **end-to-end attendance pipeline**:
 
 **Camera → Face Recognition → Student Identification → Attendance Check → Mark Attendance → View Attendance Log**
+
+## Test Accounts
+
+After MySQL is running and the schema migrations are applied, seed local-only
+accounts for every role:
+
+```text
+python backend/seed_test_accounts.py
+```
+
+| Role | Username | Password |
+|---|---|---|
+| Admin | `000` | `just4test` |
+| HOD | `test.hod` | `HodTest123!` |
+| Teacher (class Demo) | `test.teacher` | `TeacherTest123!` |
+| Staff | `test.staff` | `StaffTest123!` |
+| Reviewer | `test.reviewer` | `ReviewerTest123!` |
+| Student (Demo Student) | `test.student` | `StudentTest123!` |
+| Parent (Demo Student) | `test.parent` | `ParentTest123!` |
+
+The seed is repeatable and resets these demo account passwords each time. These
+credentials are for local testing only. To test teacher scoping, use the seeded
+`Demo` class and `Demo Student` record.
+
+For an existing database that has already run `database/future_features.sql`,
+run `database/migrate_role_access.sql` and
+`database/migrate_attendance_absent.sql` to add the new roles/class field and
+the `late` attendance status. For a fresh database, run `database/facial.sql`
+followed by `database/future_features.sql`.
+
+Install backend packages with `pip install -r backend/requirements.txt`, start
+the APIs with `backend/run_backend.bat`, and start React from
+`frontend/facial_attendance_capture_engine` with `npm start`. The frontend sends
+requests to Flask; it never connects directly to MySQL.
 
 The priority is to get this complete pipeline working reliably before adding additional features or complexity.

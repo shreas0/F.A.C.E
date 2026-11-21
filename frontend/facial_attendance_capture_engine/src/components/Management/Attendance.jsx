@@ -56,6 +56,18 @@ function Attendance() {
         }
     }, []);
 
+    function downloadPdf() {
+        let form = document.getElementById("attendance-filter");
+        let startDate = form.elements.start_date.value;
+        let endDate = form.elements.end_date.value;
+        let studentId = form.elements.student_id.value;
+        let query = `start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`;
+        if (studentId) {
+            query += `&student_id=${encodeURIComponent(studentId)}`;
+        }
+        window.open(`http://localhost:5000/api/attendance/download-pdf?${query}`, "_blank");
+    }
+
     return (
         <div>
             <h1>Attendance Records</h1>
@@ -65,6 +77,7 @@ function Attendance() {
                 <label>To <input id="attendance-end-date" type="date" name="end_date" required /></label>
                 <label>Student ID (optional) <input type="number" name="student_id" /></label>
                 <button type="submit">Search records</button>
+                <button type="button" onClick={downloadPdf}>Download PDF</button>
             </form>
             <p id="attendance-message" role="status"></p>
             <div id="attendance-table"></div>
@@ -77,6 +90,7 @@ function Attendance() {
                         <select name="status">
                             <option value="present">Present</option>
                             <option value="absent">Absent</option>
+                            <option value="late">Late</option>
                             <option value="failed">Failed</option>
                         </select>
                     </label>

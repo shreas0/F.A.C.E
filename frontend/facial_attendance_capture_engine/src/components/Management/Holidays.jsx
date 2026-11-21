@@ -1,8 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiRequest, showMessage, showTable } from "../../services/faceApi";
 
 function Holidays() {
+    const [role, setRole] = useState("");
+    const canManage = role === "admin" || role === "hod";
     async function loadHolidays() {
         let yearInput = document.getElementById("holiday-year");
         let year = yearInput.value || new Date().getFullYear();
@@ -36,6 +38,7 @@ function Holidays() {
     useEffect(function () {
         let yearInput = document.getElementById("holiday-year");
         yearInput.value = new Date().getFullYear();
+        apiRequest("/api/me").then((account) => setRole(account.role));
         loadHolidays();
     }, []);
 
@@ -43,7 +46,7 @@ function Holidays() {
         <div>
             <h1>Holiday Calendar</h1>
             <p><Link to="/Dashboard/Admin">Back to dashboard</Link></p>
-            <section>
+            {canManage && <section>
                 <h2>Add holiday</h2>
                 <form onSubmit={addHoliday}>
                     <label>Date <input type="date" name="holiday_date" required /></label>
@@ -51,7 +54,7 @@ function Holidays() {
                     <button type="submit">Add holiday</button>
                 </form>
                 <p id="holiday-form-message" role="status"></p>
-            </section>
+            </section>}
             <section>
                 <h2>Calendar list</h2>
                 <label>Year <input type="number" id="holiday-year" /></label>

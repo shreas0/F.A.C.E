@@ -1,10 +1,5 @@
 CREATE DATABASE IF NOT EXISTS facial_attendance;
 USE facial_attendance;
-DROP TABLE IF exists admins;
-DROP TABLE IF EXISTS attendance_sessions;
-DROP TABLE IF EXISTS attendance;
-DROP TABLE IF EXISTS students;
-
 
 -- ---------------------------------------------------------------------
 -- Table: admins
@@ -16,6 +11,13 @@ CREATE TABLE IF NOT EXISTS admins (
     created_on    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
 
 ) ENGINE=InnoDB;
+-- Sample admin login: username (admin ID) 000, password just4test.
+INSERT INTO admins (username, password_hash)
+VALUES (
+    '000',
+    'pbkdf2_sha256$600000$622e16b9ac1fcce4510fd5a09d659ee9$4200222f2f7e4792591595dcbc5af4d3de505985390e3f7cab4695ab809b369c'
+)
+ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash);
 -- ---------------------------------------------------------------------
 -- Table: students
 -- ---------------------------------------------------------------------
@@ -34,7 +36,7 @@ CREATE TABLE IF NOT EXISTS attendance (
     student_id        INT NOT NULL,
     timestamp         DATETIME NOT NULL,
     attendance_date   DATE GENERATED ALWAYS AS (DATE(timestamp)) STORED,
-    status            ENUM('absent', 'present', 'failed') NOT NULL DEFAULT 'absent',
+    status            ENUM('absent', 'present', 'late', 'failed') NOT NULL DEFAULT 'absent',
     CONSTRAINT fk_attendance_student
         FOREIGN KEY (student_id) REFERENCES students(id)
         ON DELETE CASCADE,

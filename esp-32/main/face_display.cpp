@@ -8,12 +8,14 @@
 #include <cstring>
 #include <ctime>
 
+#include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "esp_err.h"
 #include "esp_lcd_io_i2c.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_ssd1306.h"
 #include "esp_log.h"
+#include "esp_rom_sys.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
@@ -38,10 +40,11 @@ uint8_t s_pixels[BUFFER_SIZE]{};
 
 esp_err_t flush_locked()
 {
+    if (!s_panel) return ESP_ERR_INVALID_STATE;
     const esp_err_t err = esp_lcd_panel_draw_bitmap(
         s_panel, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, s_pixels);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "OLED update failed: %s", esp_err_to_name(err));
+        ESP_LOGD(TAG, "OLED update failed: %s", esp_err_to_name(err));
     }
     return err;
 }
@@ -166,12 +169,12 @@ void draw_status_bar_locked()
 void status_bar_task(void *)
 {
     while (true) {
-        if (s_ready && s_mutex && xSemaphoreTake(s_mutex, portMAX_DELAY) == pdTRUE) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        if (s_ready && s_mutex && xSemaphoreTake(s_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
             draw_status_bar_locked();
             flush_locked();
             xSemaphoreGive(s_mutex);
         }
-        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
 
@@ -190,28 +193,97 @@ bool face_display_init()
         return false;
     }
 
-    i2c_master_bus_config_t bus_config{};
-    bus_config.clk_source = I2C_CLK_SRC_DEFAULT;
-    bus_config.i2c_port = -1;
-    bus_config.sda_io_num = static_cast<gpio_num_t>(FACE_OLED_SDA_GPIO);
-    bus_config.scl_io_num = static_cast<gpio_num_t>(FACE_OLED_SCL_GPIO);
-    bus_config.glitch_ignore_cnt = 7;
-    bus_config.flags.enable_internal_pullup = true;
-    esp_err_t err = i2c_new_master_bus(&bus_config, &s_i2c_bus);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "I2C bus init failed on SDA=%d SCL=%d: %s",
-                 FACE_OLED_SDA_GPIO, FACE_OLED_SCL_GPIO, esp_err_to_name(err));
-        return false;
+    struct PinCandidate {
+        int sda;
+        int scl;
+        const char *label;
+    };
+    static const PinCandidate CANDIDATES[] = {
+        {FACE_OLED_SDA_GPIO, FACE_OLED_SCL_GPIO, "Default (13/14)"},
+        {FACE_OLED_SCL_GPIO, FACE_OLED_SDA_GPIO, "Reversed (14/13)"},
+        {15, 14, "Alt (15/14)"},
+        {14, 15, "Alt (14/15)"},
+        {13, 15, "Alt (13/15)"},
+        {15, 13, "Alt (15/13)"},
+        {12, 13, "Alt (12/13)"},
+        {13, 12, "Alt (13/12)"},
+        {2, 14, "Alt (2/14)"},
+        {14, 2, "Alt (14/2)"},
+        {4, 13, "Alt (4/13)"},
+        {13, 4, "Alt (13/4)"},
+    };
+
+    uint8_t address = 0x3C;
+    int chosen_sda = FACE_OLED_SDA_GPIO;
+    int chosen_scl = FACE_OLED_SCL_GPIO;
+    bool found_device = false;
+
+    for (const auto &cand : CANDIDATES) {
+        // Bus recovery before probe to clear any stuck slave state
+        gpio_set_direction(static_cast<gpio_num_t>(cand.sda), GPIO_MODE_INPUT_OUTPUT_OD);
+        gpio_set_direction(static_cast<gpio_num_t>(cand.scl), GPIO_MODE_INPUT_OUTPUT_OD);
+        gpio_set_pull_mode(static_cast<gpio_num_t>(cand.sda), GPIO_PULLUP_ONLY);
+        gpio_set_pull_mode(static_cast<gpio_num_t>(cand.scl), GPIO_PULLUP_ONLY);
+        gpio_set_level(static_cast<gpio_num_t>(cand.sda), 1);
+        gpio_set_level(static_cast<gpio_num_t>(cand.scl), 1);
+        esp_rom_delay_us(10);
+        for (int i = 0; i < 9; ++i) {
+            gpio_set_level(static_cast<gpio_num_t>(cand.scl), 0);
+            esp_rom_delay_us(5);
+            gpio_set_level(static_cast<gpio_num_t>(cand.scl), 1);
+            esp_rom_delay_us(5);
+        }
+
+        i2c_master_bus_config_t bus_config{};
+        bus_config.clk_source = I2C_CLK_SRC_DEFAULT;
+        bus_config.i2c_port = I2C_NUM_0;
+        bus_config.sda_io_num = static_cast<gpio_num_t>(cand.sda);
+        bus_config.scl_io_num = static_cast<gpio_num_t>(cand.scl);
+        bus_config.glitch_ignore_cnt = 7;
+        bus_config.flags.enable_internal_pullup = true;
+
+        i2c_master_bus_handle_t test_bus = nullptr;
+        if (i2c_new_master_bus(&bus_config, &test_bus) == ESP_OK) {
+            if (i2c_master_probe(test_bus, 0x3C, 50) == ESP_OK) {
+                address = 0x3C;
+                chosen_sda = cand.sda;
+                chosen_scl = cand.scl;
+                s_i2c_bus = test_bus;
+                found_device = true;
+                ESP_LOGI(TAG, "OLED detected on %s SDA=%d SCL=%d at 0x3C", cand.label, chosen_sda, chosen_scl);
+                break;
+            } else if (i2c_master_probe(test_bus, 0x3D, 50) == ESP_OK) {
+                address = 0x3D;
+                chosen_sda = cand.sda;
+                chosen_scl = cand.scl;
+                s_i2c_bus = test_bus;
+                found_device = true;
+                ESP_LOGI(TAG, "OLED detected on %s SDA=%d SCL=%d at 0x3D", cand.label, chosen_sda, chosen_scl);
+                break;
+            }
+            i2c_del_master_bus(test_bus);
+        }
     }
 
-    uint8_t address = 0;
-    if (i2c_master_probe(s_i2c_bus, 0x3C, 50) == ESP_OK) {
+    if (!found_device) {
+        ESP_LOGW(TAG, "No OLED ACKed during scan; driving configured breadboard SDA=%d SCL=%d at 0x3C",
+                 FACE_OLED_SDA_GPIO, FACE_OLED_SCL_GPIO);
+        i2c_master_bus_config_t bus_config{};
+        bus_config.clk_source = I2C_CLK_SRC_DEFAULT;
+        bus_config.i2c_port = I2C_NUM_0;
+        bus_config.sda_io_num = static_cast<gpio_num_t>(FACE_OLED_SDA_GPIO);
+        bus_config.scl_io_num = static_cast<gpio_num_t>(FACE_OLED_SCL_GPIO);
+        bus_config.glitch_ignore_cnt = 7;
+        bus_config.flags.enable_internal_pullup = true;
+        esp_err_t b_err = i2c_new_master_bus(&bus_config, &s_i2c_bus);
+        if (b_err != ESP_OK) {
+            ESP_LOGE(TAG, "I2C bus init failed on SDA=%d SCL=%d: %s",
+                     FACE_OLED_SDA_GPIO, FACE_OLED_SCL_GPIO, esp_err_to_name(b_err));
+            return false;
+        }
         address = 0x3C;
-    } else if (i2c_master_probe(s_i2c_bus, 0x3D, 50) == ESP_OK) {
-        address = 0x3D;
-    } else {
-        ESP_LOGE(TAG, "No OLED found at I2C address 0x3C or 0x3D");
-        return false;
+        chosen_sda = FACE_OLED_SDA_GPIO;
+        chosen_scl = FACE_OLED_SCL_GPIO;
     }
 
     esp_lcd_panel_io_i2c_config_t io_config{};
@@ -220,9 +292,9 @@ bool face_display_init()
     io_config.dc_bit_offset = 6;
     io_config.lcd_cmd_bits = 8;
     io_config.lcd_param_bits = 8;
-    io_config.scl_speed_hz = 400000;
+    io_config.scl_speed_hz = 100000; // 100 kHz is much more noise-tolerant on breadboard jumpers
     io_config.transaction_timeout_ms = 1000;
-    err = esp_lcd_new_panel_io_i2c(s_i2c_bus, &io_config, &s_panel_io);
+    esp_err_t err = esp_lcd_new_panel_io_i2c(s_i2c_bus, &io_config, &s_panel_io);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "OLED I2C interface init failed: %s", esp_err_to_name(err));
         return false;
@@ -236,27 +308,18 @@ bool face_display_init()
     panel_config.vendor_config = &oled_config;
     err = esp_lcd_new_panel_ssd1306(s_panel_io, &panel_config, &s_panel);
     if (err == ESP_OK) {
-        err = esp_lcd_panel_reset(s_panel);
-    }
-    if (err == ESP_OK) {
-        err = esp_lcd_panel_init(s_panel);
-    }
-    if (err == ESP_OK) {
-        // Rotate the complete OLED image, including text and camera preview, 180 degrees.
-        err = esp_lcd_panel_mirror(s_panel, true, true);
-    }
-    if (err == ESP_OK) {
-        err = esp_lcd_panel_disp_on_off(s_panel, true);
-    }
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "SSD1306 initialization failed: %s", esp_err_to_name(err));
-        return false;
+        esp_lcd_panel_reset(s_panel);
+        esp_lcd_panel_init(s_panel);
+        esp_lcd_panel_mirror(s_panel, true, true);
+        esp_lcd_panel_disp_on_off(s_panel, true);
+    } else {
+        ESP_LOGW(TAG, "SSD1306 panel attach warning: %s (continuing for breadboard)", esp_err_to_name(err));
     }
 
     s_ready = true;
-    ESP_LOGI(TAG, "SSD1306 OLED ready: 128x%d, I2C 0x%02X, SDA=%d SCL=%d",
+    ESP_LOGI(TAG, "SSD1306 OLED initialized (ready=true): 128x%d, I2C 0x%02X, SDA=%d SCL=%d",
              FACE_OLED_HEIGHT, address, FACE_OLED_SDA_GPIO, FACE_OLED_SCL_GPIO);
-    face_display_show("FACE CAM", "DISPLAY READY", "BOOTING...", nullptr);
+    face_display_show("FACE ATTENDANCE", "DISPLAY READY", "BOOTING...", nullptr);
     if (xTaskCreate(status_bar_task, "oled_status", 3072, nullptr, 1, nullptr) != pdPASS) {
         ESP_LOGE(TAG, "Could not start OLED clock/status task");
     }

@@ -32,9 +32,6 @@ function Student() {
                 welcomeStudent = { id: account.student_id, name: account.username };
             }
             showMessage("student-welcome", `Welcome, ${welcomeStudent.name}. Student ID: ${welcomeStudent.id}`);
-            if (account.role === "student_readonly") {
-                showMessage("student-summary", "This sign-in can only view this page. Use a student account and password to use attendance and leave features.");
-            }
         }).catch(function () {
             navigate("/StudentSign");
         });
@@ -42,7 +39,7 @@ function Student() {
 
     return (
         <div>
-            <h1>Student Dashboard</h1>
+            <h1>Student and Family Dashboard</h1>
             <p id="student-welcome">Loading student...</p>
             <section>
                 <h2>My Attendance</h2>

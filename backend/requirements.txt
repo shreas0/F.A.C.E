@@ -2,3 +2,7 @@ Flask
 flask-cors
 mysql-connector-python
 cryptography
+numpy
+opencv-python
+deepface
+fpdf2

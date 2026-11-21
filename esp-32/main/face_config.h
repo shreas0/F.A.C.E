@@ -10,12 +10,12 @@
 
 #define FACE_DETECTION_FPS            5
 #define FACE_OLED_PREVIEW_FPS         4
-#define FACE_FACE_CLEAR_FRAMES        5
-#define FACE_SUCCESS_COOLDOWN_SEC    5
-#define FACE_FAILURE_RETRY_SEC       5
+#define FACE_FACE_CLEAR_FRAMES        1
+#define FACE_SUCCESS_COOLDOWN_SEC    1
+#define FACE_FAILURE_RETRY_SEC       1
 #define FACE_WIFI_CONNECT_TIMEOUT_MS 15000
-#define FACE_HTTP_TIMEOUT_MS         90000
-#define FACE_HTTP_RETRY_LIMIT        3
+#define FACE_HTTP_TIMEOUT_MS         15000
+#define FACE_HTTP_RETRY_LIMIT        2
 #define FACE_JPEG_QUALITY             12
 
 #define FACE_NTP_WAIT_MS             20000

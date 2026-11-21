@@ -38,6 +38,8 @@ backend/captured_faces/
 backend/captured_face/
 backend/attending_face/
 backend/attending_faces/
+backend/attendance_report.pdf
+test_*.jpg
 esp-32/tools/facecam_qvga_preview.jpg
 *.csv
 !esp-32/partitions.csv

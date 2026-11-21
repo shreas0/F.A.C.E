@@ -9,9 +9,8 @@ import json
 
 app = Flask(__name__)
 ESP_SERVER_PORT = int(os.getenv("ESP_SERVER_PORT", "5001"))
-
-# CHANGE THIS TO YOUR DESTINATION
-SAVE_DIR = r"C:\Users\shres\Documents\F.A.C.E\F.A.C.E\backend\attending_faces"
+BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+SAVE_DIR = os.getenv("FACE_ATTENDANCE_IMAGE_DIR", os.path.join(BACKEND_DIR, "attending_faces"))
 os.makedirs(SAVE_DIR, exist_ok=True)
 
 WIDTH = 320
@@ -34,7 +33,10 @@ def _recognize_and_mark(image_path):
     if os.path.isfile(result_path):
         try:
             with open(result_path, "r", encoding="utf-8") as result_file:
-                return json.load(result_file)
+                cached = json.load(result_file)
+                # Only return cached result if it was a final business status, not a server/database error
+                if cached.get("status") in ("marked", "already_marked") or cached.get("reason") in ("unknown", "no_face"):
+                    return cached
         except (OSError, ValueError):
             pass
     try:
@@ -56,7 +58,7 @@ def _recognize_and_mark(image_path):
 
 @app.route("/upload", methods=["POST"])
 def upload_jpeg():
-    """Save one UXGA JPEG posted by the ESP32-CAM firmware."""
+    """Save one JPEG posted by the ESP32-CAM firmware and recognize the face."""
     if request.mimetype != "image/jpeg":
         return jsonify({"error": "Content-Type must be image/jpeg"}), 415
 
@@ -68,9 +70,10 @@ def upload_jpeg():
     if image is None:
         return jsonify({"error": "JPEG could not be decoded"}), 400
     width, height = image.shape[1], image.shape[0]
-    if (width, height) != (1600, 1200):
-        return jsonify({"error": "Expected a 1600x1200 UXGA JPEG",
+    if width < 160 or height < 120:
+        return jsonify({"error": "Image resolution too low for face recognition",
                         "received": f"{width}x{height}"}), 400
+    resolution_str = f"{width}x{height}"
 
     device_id = re.sub(r"[^A-Za-z0-9_-]", "_", request.headers.get("X-Device-ID", "esp32cam"))[:32]
     capture_id = re.sub(r"[^A-Za-z0-9_-]", "_", request.headers.get("X-Capture-ID", ""))[:64]
@@ -84,7 +87,7 @@ def upload_jpeg():
     if os.path.exists(filepath):
         attendance = _recognize_and_mark(filepath)
         return jsonify({"status": "success", "duplicate": True,
-                        "file": filename, "resolution": "1600x1200",
+                        "file": filename, "resolution": resolution_str,
                         "attendance": attendance}), 200
 
     temporary_path = filepath + "." + uuid.uuid4().hex + ".tmp"
@@ -96,10 +99,10 @@ def upload_jpeg():
         if os.path.exists(temporary_path):
             os.remove(temporary_path)
 
-    print(f"Saved UXGA JPEG from {device_id}: {filename}")
+    print(f"Saved JPEG ({resolution_str}) from {device_id}: {filename}")
     attendance = _recognize_and_mark(filepath)
     return jsonify({"status": "success", "file": filename,
-                    "resolution": "1600x1200",
+                    "resolution": resolution_str,
                     "attendance": attendance,
                     "capture_timestamp": request.headers.get("X-Capture-Timestamp")}), 200
 

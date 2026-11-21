@@ -56,27 +56,5 @@ def admin_login():
     }})
 
 
-@app.route("/api/student/login", methods=["POST"])
-def student_login():
-    data = request.get_json(silent=True) or {}
-    student_id = str(data.get("student_id", "")).strip()
-
-    if not student_id.isdigit():
-        return jsonify({"message": "Enter a valid student enrollment ID."}), 400
-
-    database = get_database()
-    if database is None:
-        return jsonify({"message": "The login API is running, but MySQL is unavailable. Start MySQL in XAMPP and confirm it uses port 3306."}), 503
-
-    student = database.get_student(student_id)
-    if not student:
-        return jsonify({"message": "No student was found with that enrollment ID."}), 401
-
-    return jsonify({"message": "Sign-in successful.", "student": {
-        "id": student[0],
-        "name": student[1],
-    }})
-
-
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)

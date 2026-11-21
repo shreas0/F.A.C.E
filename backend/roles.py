@@ -13,9 +13,20 @@ def _hash_password(password):
     return f"pbkdf2_sha256${ITERATIONS}${salt.hex()}${digest.hex()}"
 
 
-def create_user(username, password, role_name, email, student_id=None):
-    if not username.strip() or not email.strip() or len(password) < 8:
-        raise ValueError("Enter a username, email, and password of at least 8 characters")
+SUPPORTED_ROLES = {"admin", "hod", "teacher", "staff", "reviewer", "student", "parent"}
+
+
+def create_user(username, password, role_name, email, student_id=None, class_name=None):
+    if not username.strip() or not email.strip() or len(password) < 4:
+        raise ValueError("Enter a username, email, and password of at least 4 characters")
+    role_name = role_name.strip().lower()
+    class_name = (class_name or "").strip() or None
+    if role_name not in SUPPORTED_ROLES:
+        raise ValueError("Choose a supported account role")
+    if role_name == "teacher" and not class_name:
+        raise ValueError("Assign a class to each teacher account")
+    if role_name in ("student", "parent") and not student_id:
+        raise ValueError("Link each student or parent account to a student record")
     connection = get_connection()
     cursor = connection.cursor()
     try:
@@ -24,9 +35,9 @@ def create_user(username, password, role_name, email, student_id=None):
         if role is None:
             raise ValueError("That role does not exist")
         cursor.execute(
-            "INSERT INTO users (username, email, password_hash, role_id, student_id) "
-            "VALUES (%s, %s, %s, %s, %s)",
-            (username.strip(), email.strip().lower(), _hash_password(password), role[0], student_id),
+            "INSERT INTO users (username, email, password_hash, role_id, student_id, class_name) "
+            "VALUES (%s, %s, %s, %s, %s, %s)",
+            (username.strip(), email.strip().lower(), _hash_password(password), role[0], student_id, class_name),
         )
         connection.commit()
         return cursor.lastrowid
@@ -43,10 +54,10 @@ def check_login(username, password):
     cursor = connection.cursor(dictionary=True)
     try:
         cursor.execute(
-            "SELECT users.id, users.username, users.email, roles.name AS role "
+            "SELECT users.id, users.username, users.email, users.class_name, roles.name AS role "
             "FROM users JOIN roles ON roles.id = users.role_id "
-            "WHERE users.username = %s AND users.active = 1",
-            (username.strip(),),
+            "WHERE (users.username = %s OR users.email = %s) AND users.active = 1",
+            (username.strip(), username.strip().lower()),
         )
         user = cursor.fetchone()
         if user is None:

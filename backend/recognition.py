@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import json
+import ast
 import threading
 import numpy as np
 from deepface import DeepFace
@@ -9,8 +10,10 @@ from deepface import DeepFace
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from database import Database
 
-WATCH_FOLDERS = ["attending_face"]
-SIMILARITY_THRESHOLD = 0.40
+BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+WATCH_FOLDERS = [os.getenv("FACE_ATTENDANCE_IMAGE_DIR", os.path.join(BACKEND_DIR, "attending_faces"))]
+SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.45"))
+REQUIRE_SESSION = os.getenv("REQUIRE_ATTENDANCE_SESSION", "false").lower() in ("true", "1", "yes")
 POLL_INTERVAL = 1
 _recognition_lock = threading.Lock()
 
@@ -19,7 +22,12 @@ for f in WATCH_FOLDERS:
 
 def cosine_dist(a, b):
     a, b = np.array(a), np.array(b)
-    return 1.0 - (np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+    if a.size == 0 or b.size == 0 or a.shape != b.shape:
+        raise ValueError("Face embeddings must have matching non-zero dimensions")
+    denominator = np.linalg.norm(a) * np.linalg.norm(b)
+    if denominator == 0:
+        raise ValueError("Face embeddings must not be zero vectors")
+    return 1.0 - (np.dot(a, b) / denominator)
 
 def parse_encoding(enc):
     if isinstance(enc, (list, np.ndarray)):
@@ -27,7 +35,7 @@ def parse_encoding(enc):
     try:
         return json.loads(enc)
     except Exception:
-        return eval(enc)
+        return ast.literal_eval(enc)
 
 def load_registered_students():
     try:
@@ -37,6 +45,8 @@ def load_registered_students():
             s_id, name, enc = r[0], r[1], r[2]
             try:
                 parsed = parse_encoding(enc)
+                if not parsed or len(parsed) == 0:
+                    continue
                 students.append({"id": s_id, "name": name, "encoding": parsed})
             except Exception:
                 continue
@@ -85,7 +95,7 @@ def process_image(file_path):
         result.update({"name": name, "reason": "session_inactive"})
         print(f"[RECOGNIZED] Matched: {name} (Student ID: {student_id}, Distance: {min_dist:.2f})")
         try:
-            if not Database.is_attendance_session_active():
+            if REQUIRE_SESSION and not Database.is_attendance_session_active():
                 print("[SESSION] No active attendance session; attendance not marked.")
                 return result
             att_id = Database.create_attendance(student_id, "present")

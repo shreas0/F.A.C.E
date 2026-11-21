@@ -257,37 +257,6 @@ void send_serial_preview(camera_fb_t *frame)
     std::free(jpeg);
 }
 
-struct JpegStreamContext {
-    esp_http_client_handle_t client;
-    size_t byte_count = 0;
-    bool failed = false;
-};
-
-size_t count_jpeg_bytes(void *arg, size_t, const void *, size_t len)
-{
-    auto *context = static_cast<JpegStreamContext *>(arg);
-    context->byte_count += len;
-    return len;
-}
-
-size_t write_jpeg_chunk(void *arg, size_t, const void *data, size_t len)
-{
-    auto *context = static_cast<JpegStreamContext *>(arg);
-    const char *bytes = static_cast<const char *>(data);
-    size_t written = 0;
-    while (written < len) {
-        const int result = esp_http_client_write(context->client, bytes + written,
-                                                static_cast<int>(len - written));
-        if (result <= 0) {
-            context->failed = true;
-            return 0;
-        }
-        written += static_cast<size_t>(result);
-    }
-    context->byte_count += written;
-    return written;
-}
-
 struct AttendanceResult {
     char status[24] = "unknown";
     char name[48] = "";
@@ -302,30 +271,23 @@ void copy_json_string(char *target, size_t target_size, const cJSON *object,
     std::snprintf(target, target_size, "%s", value);
 }
 
-bool upload_uxga_frame(camera_fb_t *frame, const char *capture_id,
-                       AttendanceResult *attendance)
+bool upload_detection_frame(camera_fb_t *frame, const char *capture_id,
+                            AttendanceResult *attendance)
 {
-    if (!frame || frame->format != PIXFORMAT_RGB565 || !frame->buf ||
-        frame->width != 1600 || frame->height != 1200 ||
-        frame->len < static_cast<size_t>(frame->width) * frame->height * 2) {
-        ESP_LOGE(TAG, "Refusing invalid UXGA RGB565 frame (format=%d, %ux%u, %u bytes)",
-                 frame ? static_cast<int>(frame->format) : -1,
-                 frame ? frame->width : 0, frame ? frame->height : 0,
-                 frame ? static_cast<unsigned>(frame->len) : 0);
+    if (!frame || frame->format != PIXFORMAT_RGB565 || !frame->buf || frame->len == 0) {
+        ESP_LOGE(TAG, "Refusing invalid detection frame for upload");
         return false;
     }
 
-    // Count encoded bytes first, then stream the encoder output directly into
-    // a fixed Content-Length HTTP request. This avoids a second multi-megabyte
-    // UXGA allocation and keeps Flask's ordinary image/jpeg request handling.
-    JpegStreamContext count_context{};
-    if (!frame2jpg_cb(frame, FACE_JPEG_QUALITY, count_jpeg_bytes, &count_context) ||
-        count_context.byte_count == 0 || count_context.byte_count > INT_MAX) {
-        ESP_LOGE(TAG, "Could not encode UXGA RGB565 frame to JPEG");
-        face_display_show("ENCODE FAILED", "UXGA TO JPEG", nullptr, nullptr);
+    uint8_t *jpeg_buf = nullptr;
+    size_t jpeg_len = 0;
+    if (!fmt2jpg(frame->buf, frame->len, frame->width, frame->height,
+                 frame->format, FACE_JPEG_QUALITY, &jpeg_buf, &jpeg_len) ||
+        !jpeg_buf || jpeg_len == 0) {
+        ESP_LOGE(TAG, "Fast JPEG conversion failed");
+        if (jpeg_buf) std::free(jpeg_buf);
         return false;
     }
-    const size_t jpeg_length = count_context.byte_count;
 
     char url[160];
     std::snprintf(url, sizeof(url), "http://%s:%d%s", FACE_SERVER_HOST,
@@ -337,152 +299,94 @@ bool upload_uxga_frame(camera_fb_t *frame, const char *capture_id,
     char timestamp[40] = "unknown";
     std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%S%z", &local_time);
 
-    ESP_LOGI(TAG, "Starting image transfer: POST %s (%u-byte UXGA JPEG, capture %s)",
-             url, static_cast<unsigned>(jpeg_length), capture_id);
+    ESP_LOGI(TAG, "Instant image upload: POST %s (%u-byte JPEG %ux%u, capture %s)",
+             url, static_cast<unsigned>(jpeg_len), frame->width, frame->height, capture_id);
 
-    for (int attempt = 1; attempt <= FACE_HTTP_RETRY_LIMIT; ++attempt) {
-        char attempt_line[22];
-        std::snprintf(attempt_line, sizeof(attempt_line), "TRY %d OF %d",
-                      attempt, FACE_HTTP_RETRY_LIMIT);
-        face_display_show("SENDING IMAGE", attempt_line, "FLASK /UPLOAD", nullptr);
-        esp_http_client_config_t config{};
-        config.url = url;
-        config.method = HTTP_METHOD_POST;
-        config.timeout_ms = FACE_HTTP_TIMEOUT_MS;
-        config.buffer_size = 1024;
-        config.buffer_size_tx = 1024;
-        config.keep_alive_enable = false;
+    face_display_show("SENDING IMAGE", "CHECKING ATTENDANCE", "PLEASE WAIT...", nullptr);
 
-        esp_http_client_handle_t client = esp_http_client_init(&config);
-        if (!client) {
-            ESP_LOGE(TAG, "Could not create HTTP client");
-            return false;
-        }
+    esp_http_client_config_t config{};
+    config.url = url;
+    config.method = HTTP_METHOD_POST;
+    config.timeout_ms = FACE_HTTP_TIMEOUT_MS;
+    config.buffer_size = 1024;
+    config.buffer_size_tx = 1024;
+    config.keep_alive_enable = true;
 
-        esp_http_client_set_header(client, "Content-Type", "image/jpeg");
-        esp_http_client_set_header(client, "X-Device-ID", FACE_DEVICE_ID);
-        esp_http_client_set_header(client, "X-Capture-ID", capture_id);
-        esp_http_client_set_header(client, "X-Capture-Timestamp", timestamp);
-        esp_http_client_set_header(client, "X-Image-Resolution", "1600x1200");
-        esp_err_t err = esp_http_client_open(client, static_cast<int>(jpeg_length));
-        JpegStreamContext stream_context{client};
-        bool encoded = false;
-        if (err == ESP_OK) {
-            encoded = frame2jpg_cb(frame, FACE_JPEG_QUALITY, write_jpeg_chunk,
-                                   &stream_context);
-            if (!encoded || stream_context.failed || stream_context.byte_count != jpeg_length) {
-                err = ESP_FAIL;
-                ESP_LOGE(TAG, "JPEG stream failed (encoded=%d, wrote=%u of %u bytes)",
-                         encoded, static_cast<unsigned>(stream_context.byte_count),
-                         static_cast<unsigned>(jpeg_length));
-            }
-        }
-        if (err == ESP_OK) {
-            const int64_t response_length = esp_http_client_fetch_headers(client);
-            if (response_length < 0) {
-                err = ESP_FAIL;
-            }
-        }
-        const int status = esp_http_client_get_status_code(client);
-        char response_body[768]{};
-        size_t response_used = 0;
-        if (err == ESP_OK && status >= 200 && status < 300) {
-            while (response_used + 1 < sizeof(response_body)) {
-                const int received = esp_http_client_read(
-                    client, response_body + response_used,
-                    static_cast<int>(sizeof(response_body) - response_used - 1));
-                if (received <= 0) break;
-                response_used += static_cast<size_t>(received);
-            }
-            response_body[response_used] = '\0';
-        }
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        if (err == ESP_OK && status >= 200 && status < 300) {
-            ESP_LOGI(TAG, "JPEG uploaded (%u bytes, HTTP %d)",
-                     static_cast<unsigned>(jpeg_length), status);
-            face_display_show("IMAGE SENT", "IDENTIFYING...", "CHECKING ATTENDANCE", nullptr);
-            cJSON *root = cJSON_Parse(response_body);
-            const cJSON *result = root ? cJSON_GetObjectItemCaseSensitive(root, "attendance") : nullptr;
-            if (attendance && cJSON_IsObject(result)) {
-                copy_json_string(attendance->status, sizeof(attendance->status), result,
-                                 "status", "unknown");
-                copy_json_string(attendance->name, sizeof(attendance->name), result,
-                                 "name", "");
-                copy_json_string(attendance->reason, sizeof(attendance->reason), result,
-                                 "reason", "");
-            } else if (attendance) {
-                std::snprintf(attendance->reason, sizeof(attendance->reason), "%s", "invalid_response");
-            }
-            if (root) cJSON_Delete(root);
-            return true;
-        }
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (!client) {
+        ESP_LOGE(TAG, "Could not create HTTP client");
+        std::free(jpeg_buf);
+        return false;
+    }
 
-        ESP_LOGW(TAG, "Upload attempt %d/%d failed (err=%s, HTTP %d)", attempt,
-                 FACE_HTTP_RETRY_LIMIT, esp_err_to_name(err), status);
-        face_display_show("UPLOAD RETRY", "CHECK SERVER", attempt_line, nullptr);
-        if (attempt < FACE_HTTP_RETRY_LIMIT) {
-            vTaskDelay(pdMS_TO_TICKS(1000));
+    char res_header[32];
+    std::snprintf(res_header, sizeof(res_header), "%ux%u", frame->width, frame->height);
+
+    esp_http_client_set_header(client, "Content-Type", "image/jpeg");
+    esp_http_client_set_header(client, "X-Device-ID", FACE_DEVICE_ID);
+    esp_http_client_set_header(client, "X-Capture-ID", capture_id);
+    esp_http_client_set_header(client, "X-Capture-Timestamp", timestamp);
+    esp_http_client_set_header(client, "X-Image-Resolution", res_header);
+
+    esp_err_t err = esp_http_client_open(client, static_cast<int>(jpeg_len));
+    if (err == ESP_OK) {
+        int written = esp_http_client_write(client, reinterpret_cast<const char *>(jpeg_buf), static_cast<int>(jpeg_len));
+        if (written < 0 || static_cast<size_t>(written) != jpeg_len) {
+            ESP_LOGE(TAG, "HTTP client write failed: %d written of %u", written, static_cast<unsigned>(jpeg_len));
+            err = ESP_FAIL;
         }
     }
+    std::free(jpeg_buf);
+
+    if (err == ESP_OK) {
+        const int64_t response_length = esp_http_client_fetch_headers(client);
+        if (response_length < 0) {
+            err = ESP_FAIL;
+        }
+    }
+
+    const int status = esp_http_client_get_status_code(client);
+    char response_body[768]{};
+    size_t response_used = 0;
+    if (err == ESP_OK && status >= 200 && status < 300) {
+        while (response_used + 1 < sizeof(response_body)) {
+            const int received = esp_http_client_read(
+                client, response_body + response_used,
+                static_cast<int>(sizeof(response_body) - response_used - 1));
+            if (received <= 0) break;
+            response_used += static_cast<size_t>(received);
+        }
+        response_body[response_used] = '\0';
+    }
+
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+
+    if (err == ESP_OK && status >= 200 && status < 300) {
+        ESP_LOGI(TAG, "JPEG uploaded (%u bytes, HTTP %d)", static_cast<unsigned>(jpeg_len), status);
+        cJSON *root = cJSON_Parse(response_body);
+        const cJSON *result = root ? cJSON_GetObjectItemCaseSensitive(root, "attendance") : nullptr;
+        if (attendance && cJSON_IsObject(result)) {
+            copy_json_string(attendance->status, sizeof(attendance->status), result,
+                             "status", "unknown");
+            copy_json_string(attendance->name, sizeof(attendance->name), result,
+                             "name", "");
+            copy_json_string(attendance->reason, sizeof(attendance->reason), result,
+                             "reason", "");
+        } else if (attendance) {
+            std::snprintf(attendance->reason, sizeof(attendance->reason), "%s", "invalid_response");
+        }
+        if (root) cJSON_Delete(root);
+        return true;
+    }
+
+    ESP_LOGW(TAG, "Fast upload failed (err=%s, HTTP %d)", esp_err_to_name(err), status);
     return false;
-}
-
-bool capture_high_resolution_and_upload(AttendanceResult *attendance)
-{
-    face_display_show("FACE CONFIRMED", "CAPTURING UXGA", "PLEASE WAIT...", nullptr);
-    camera_stop();
-    vTaskDelay(pdMS_TO_TICKS(FACE_CAMERA_RESTART_DELAY_MS));
-
-    if (!camera_start(PIXFORMAT_RGB565, FRAMESIZE_UXGA)) {
-        face_display_show("CAPTURE FAILED", "RESTORING CAMERA", nullptr, nullptr);
-        camera_start(PIXFORMAT_RGB565, FRAMESIZE_QVGA, false);
-        return false;
-    }
-    vTaskDelay(pdMS_TO_TICKS(FACE_UXGA_STABILIZE_MS));
-
-    camera_fb_t *image = esp_camera_fb_get();
-    if (!image || image->format != PIXFORMAT_RGB565 || image->len == 0 ||
-        image->width != 1600 || image->height != 1200) {
-        ESP_LOGE(TAG, "UXGA RGB565 capture invalid (frame=%p, format=%d, len=%u, %ux%u)",
-                 static_cast<void *>(image), image ? static_cast<int>(image->format) : -1,
-                 image ? static_cast<unsigned>(image->len) : 0,
-                 image ? image->width : 0, image ? image->height : 0);
-        face_display_show("CAPTURE FAILED", "BAD UXGA FRAME", nullptr, nullptr);
-        if (image) {
-            esp_camera_fb_return(image);
-        }
-        camera_stop();
-        vTaskDelay(pdMS_TO_TICKS(FACE_CAMERA_RESTART_DELAY_MS));
-        camera_start(PIXFORMAT_RGB565, FRAMESIZE_QVGA, false);
-        return false;
-    }
-
-    char capture_id[64];
-    std::snprintf(capture_id, sizeof(capture_id), "%s-%08lx", FACE_DEVICE_ID,
-                  static_cast<unsigned long>(esp_random()));
-
-    bool uploaded = false;
-    face_display_show("IMAGE READY", "CONNECTING WIFI", nullptr, nullptr);
-    if (wifi_manager_connect()) {
-        uploaded = upload_uxga_frame(image, capture_id, attendance);
-    } else {
-        ESP_LOGE(TAG, "Image was captured but not sent: Wi-Fi connection failed");
-    }
-    wifi_manager_stop();
-    esp_camera_fb_return(image);
-
-    camera_stop();
-    vTaskDelay(pdMS_TO_TICKS(FACE_CAMERA_RESTART_DELAY_MS));
-    if (!camera_start(PIXFORMAT_RGB565, FRAMESIZE_QVGA, false)) {
-        ESP_LOGE(TAG, "Could not restore QVGA detection mode");
-    }
-    return uploaded;
 }
 
 void wait_before_detection_retry()
 {
-    vTaskDelay(pdMS_TO_TICKS(5000));
+    vTaskDelay(pdMS_TO_TICKS(2000));
 }
 
 } // namespace
@@ -505,87 +409,49 @@ extern "C" void app_main(void)
     face_display_init();
     face_display_show("FACE CAM", "STARTING...", nullptr, nullptr);
 
-    if (!wifi_manager_init()) {
-        ESP_LOGE(TAG, "Wi-Fi manager initialization failed");
-        face_display_show("STARTUP ERROR", "WIFI INIT FAILED", nullptr, nullptr);
-        return;
+    wifi_manager_init();
+    wifi_manager_connect();
+
+    if (!camera_start(PIXFORMAT_RGB565, FRAMESIZE_QVGA)) {
+        ESP_LOGE(TAG, "Camera initial start failed, retrying...");
+        face_display_show("CAMERA RETRY", "WAITING 2 SEC...", nullptr, nullptr);
+        vTaskDelay(pdMS_TO_TICKS(2000));
+        camera_start(PIXFORMAT_RGB565, FRAMESIZE_QVGA);
     }
 
-    bool time_synced = false;
-    if (wifi_manager_test_mode_active()) {
-        ESP_LOGW(TAG, "Starting in TEST MODE: skipping Wi-Fi/NTP; no captures will be uploaded");
-        face_display_show("TEST MODE", "WIFI NOT NEEDED", "NO UPLOADS", "STARTING CAMERA");
-    } else if (!wifi_manager_ensure_time_synced()) {
-        ESP_LOGE(TAG, "Clock setup failed; camera remains idle");
-        face_display_show("TIME SETUP ERROR", "CAMERA IS IDLE", nullptr, nullptr);
-        return;
-    } else {
-        time_synced = true;
-    }
+    ESP_LOGI(TAG, "Camera active: live preview streaming at %u FPS; ready for students",
+             FACE_OLED_PREVIEW_FPS);
+    face_display_show("FACE ATTENDANCE", "READY", "STAND IN FRONT", nullptr);
 
     // Use ESP-WHO's recommended ESP32 thresholds and input resize for QVGA RGB565.
     HumanFaceDetectMSR01 stage_one(0.1F, 0.5F, 10, 0.2F);
     HumanFaceDetectMNP01 stage_two(0.5F, 0.3F, 5);
-    int consecutive_absent = 0;
-    bool wait_for_face_clear = false;
     int64_t success_cooldown_until_us = 0;
     int64_t failure_retry_after_us = 0;
     int64_t display_hold_until_us = 0;
-    int64_t face_state_hold_until_us = 0;
     int64_t next_preview_us = 0;
-    int64_t next_message_update_us = 0;
+    int64_t status_report_us = esp_timer_get_time();
+    unsigned frames_since_report = 0;
+    unsigned face_hits_since_report = 0;
+    unsigned missing_frames_since_report = 0;
+    uint64_t inference_time_total_us = 0;
+    int64_t next_test_report_us = 0;
 
     while (true) {
-        if (!wifi_manager_test_mode_active() && !time_synced) {
-            if (!wifi_manager_ensure_time_synced()) {
-                ESP_LOGE(TAG, "Could not synchronize time for WORK MODE");
-                return;
-            }
-            time_synced = true;
-        }
-
-        if (wifi_manager_recovery_requested()) {
-            camera_stop();
-            if (!wifi_manager_ensure_time_synced()) {
-                ESP_LOGE(TAG, "Wi-Fi recovery stopped; camera remains idle");
-                return;
-            }
-            time_synced = true;
-        }
-
-        const time_t now = std::time(nullptr);
-        if (FACE_ENFORCE_OPERATING_HOURS && !wifi_manager_test_mode_active() &&
-            !is_operating_time(now)) {
-            sleep_until_next_open(now);
-        }
-
-        if (!camera_start(PIXFORMAT_RGB565, FRAMESIZE_QVGA)) {
-            face_display_show("CAMERA RETRY", "WAITING 5 SEC...", nullptr, nullptr);
-            wait_before_detection_retry();
+        if (!s_camera_ready) {
+            camera_start(PIXFORMAT_RGB565, FRAMESIZE_QVGA);
+            vTaskDelay(pdMS_TO_TICKS(500));
             continue;
         }
-        ESP_LOGI(TAG, "Detection active: %s mode; QVGA RGB565 input",
-                 wifi_manager_test_mode_active() ? "TEST" : "WORK");
-        ESP_LOGI(TAG, "Detection pacing target: %u FPS; OLED preview limit: %u FPS",
-                 FACE_DETECTION_FPS, FACE_OLED_PREVIEW_FPS);
-        int64_t status_report_us = esp_timer_get_time();
-        unsigned frames_since_report = 0;
-        unsigned face_hits_since_report = 0;
-        unsigned missing_frames_since_report = 0;
-        uint64_t inference_time_total_us = 0;
-        int64_t next_test_report_us = 0;
 
-        while ((wifi_manager_test_mode_active() || !FACE_ENFORCE_OPERATING_HOURS ||
-                is_operating_time(std::time(nullptr))) &&
-               !wifi_manager_recovery_requested()) {
-            const int64_t frame_started_us = esp_timer_get_time();
-            camera_fb_t *frame = esp_camera_fb_get();
-            if (!frame) {
-                ESP_LOGW(TAG, "Camera returned no detection frame");
-                ++missing_frames_since_report;
-                vTaskDelay(pdMS_TO_TICKS(100));
-                continue;
-            }
+        const int64_t frame_started_us = esp_timer_get_time();
+        camera_fb_t *frame = esp_camera_fb_get();
+        if (!frame) {
+            ESP_LOGW(TAG, "Camera returned no detection frame");
+            ++missing_frames_since_report;
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
 
             const unsigned frame_width = frame->width;
             const unsigned frame_height = frame->height;
@@ -638,81 +504,35 @@ extern "C" void app_main(void)
 
                 if (frame_now_us >= display_hold_until_us &&
                     frame_now_us >= next_preview_us) {
-                    face_display_show("TEST MODE", face_found ? "FACE FOUND" : "DETECTING",
-                                      "UPLOADS OFF", "TYPE MODE WORK TO UPLOAD");
-                    next_preview_us = frame_now_us + 500000LL;
-                }
-                consecutive_absent = 0;
-                wait_for_face_clear = false;
-            } else if (face_found) {
-                ++face_hits_since_report;
-                consecutive_absent = 0;
-                face_state_hold_until_us = frame_now_us + 1500000LL;
-
-                if (wait_for_face_clear) {
-                    if (frame_now_us >= next_message_update_us) {
-                        char clear_line[24];
-                        std::snprintf(clear_line, sizeof(clear_line), "CLEAR %d OF %d",
-                                      consecutive_absent, FACE_FACE_CLEAR_FRAMES);
-                        face_display_show("WAITING FOR CLEAR", "MOVE OUT OF VIEW",
-                                          clear_line, nullptr);
-                        next_message_update_us = frame_now_us + 500000LL;
-                    }
-                } else {
-                    const int64_t blocked_until_us = std::max(success_cooldown_until_us,
-                                                              failure_retry_after_us);
-                    if (frame_now_us < blocked_until_us) {
-                        const unsigned remaining_seconds = static_cast<unsigned>(
-                            (blocked_until_us - frame_now_us + 999999LL) / 1000000LL);
-                        char countdown[24];
-                        std::snprintf(countdown, sizeof(countdown), "%u SECONDS",
-                                      remaining_seconds);
-                        if (frame_now_us >= next_message_update_us) {
-                            const bool retrying = failure_retry_after_us >=
-                                                  success_cooldown_until_us;
-                            face_display_show(retrying ? "UPLOAD RETRY" : "COOLDOWN",
-                                              retrying ? "RETRY IN" : "NEXT CAPTURE",
-                                              countdown, "FACE DETECTED");
-                            ESP_LOGI(TAG, "Face detected; %s is active for %u more seconds",
-                                     retrying ? "upload retry cooldown" : "capture cooldown",
-                                     remaining_seconds);
-                            next_message_update_us = frame_now_us + 1000000LL;
-                        }
-                    } else {
-                        ESP_LOGI(TAG, "Face detected in one frame; starting capture and upload");
-                        face_display_show("FACE DETECTED", "CAPTURE STARTING",
-                                          "STAY STILL", nullptr);
-                        trigger_capture = true;
-                    }
-                }
-            } else {
-                if (wait_for_face_clear) {
-                    ++consecutive_absent;
-                    if (consecutive_absent >= FACE_FACE_CLEAR_FRAMES) {
-                        wait_for_face_clear = false;
-                        consecutive_absent = 0;
-                        ESP_LOGI(TAG, "Face cleared; next detected face can trigger capture");
-                        face_display_show("FACE CLEAR", "READY FOR NEXT FACE", nullptr, nullptr);
-                        face_state_hold_until_us = frame_now_us + 1000000LL;
-                    } else if (frame_now_us >= next_message_update_us) {
-                        char clear_line[24];
-                        std::snprintf(clear_line, sizeof(clear_line), "CLEAR %d OF %d",
-                                      consecutive_absent, FACE_FACE_CLEAR_FRAMES);
-                        face_display_show("WAITING FOR CLEAR", "MOVE OUT OF VIEW",
-                                          clear_line, nullptr);
-                        next_message_update_us = frame_now_us + 500000LL;
-                    }
-                }
-
-                if (frame_now_us >= display_hold_until_us &&
-                    frame_now_us >= face_state_hold_until_us &&
-                    frame_now_us >= next_preview_us) {
                     if (frame->format == PIXFORMAT_RGB565 && frame->buf) {
                         face_display_show_camera_frame(
                             reinterpret_cast<const uint16_t *>(frame->buf),
                             frame->width, frame->height);
-                    } else {
-                        face_display_show("CAMERA FORMAT", "NOT RGB565", nullptr, nullptr);
+                    }
+                    next_preview_us = frame_now_us + 1000000LL / FACE_OLED_PREVIEW_FPS;
+                }
+            } else {
+                if (face_found) {
+                    ++face_hits_since_report;
+
+                    const int64_t blocked_until_us = std::max(success_cooldown_until_us,
+                                                              failure_retry_after_us);
+                    if (frame_now_us >= blocked_until_us) {
+                        ESP_LOGI(TAG, "Face detected in frame; starting fast instant upload");
+                        trigger_capture = true;
+                    }
+                }
+
+                // Live Camera Preview on OLED:
+                // When not holding attendance status screen, continuously stream live camera frame to OLED!
+                if (frame_now_us >= display_hold_until_us && frame_now_us >= next_preview_us) {
+                    if (frame->format == PIXFORMAT_RGB565 && frame->buf) {
+                        if (!trigger_capture && face_found) {
+                            draw_detection_boxes(frame, *candidates, *faces);
+                        }
+                        face_display_show_camera_frame(
+                            reinterpret_cast<const uint16_t *>(frame->buf),
+                            frame->width, frame->height);
                     }
                     next_preview_us = frame_now_us + 1000000LL / FACE_OLED_PREVIEW_FPS;
                 }
@@ -749,46 +569,60 @@ extern "C" void app_main(void)
 
             if (trigger_capture) {
                 AttendanceResult attendance{};
-                const bool uploaded = capture_high_resolution_and_upload(&attendance);
-                consecutive_absent = 0;
+                face_display_show("FACE DETECTED", "SENDING TO SERVER...", "PLEASE WAIT...", nullptr);
+
+                char capture_id[64];
+                std::snprintf(capture_id, sizeof(capture_id), "%s-%08lx", FACE_DEVICE_ID,
+                              static_cast<unsigned long>(esp_random()));
+
+                bool connected = wifi_manager_connect();
+                bool uploaded = false;
+                if (connected) {
+                    uploaded = upload_detection_frame(frame, capture_id, &attendance);
+                } else {
+                    ESP_LOGE(TAG, "Wi-Fi not connected for upload");
+                }
+
                 if (uploaded) {
-                    wait_for_face_clear = true;
-                    success_cooldown_until_us = esp_timer_get_time() +
-                        static_cast<int64_t>(FACE_SUCCESS_COOLDOWN_SEC) * 1000000LL;
-                    ESP_LOGI(TAG, "Upload completed. Cooldown=%d sec; face-clear requirement=%d frames",
-                             FACE_SUCCESS_COOLDOWN_SEC, FACE_FACE_CLEAR_FRAMES);
+                    ESP_LOGI(TAG, "Fast upload success: status=%s, name=%s, reason=%s",
+                             attendance.status, attendance.name, attendance.reason);
                     if (std::strcmp(attendance.status, "marked") == 0) {
-                        face_display_show("ATTENDANCE MARKED", attendance.name, "PRESENT", nullptr);
+                        face_display_show("ATTENDANCE MARKED", attendance.name, "STATUS: PRESENT", "THANK YOU!");
                     } else if (std::strcmp(attendance.status, "already_marked") == 0) {
-                        face_display_show("ALREADY MARKED", attendance.name, "PRESENT TODAY", nullptr);
+                        face_display_show("ALREADY MARKED", attendance.name, "PRESENT TODAY", "HAVE A GREAT DAY");
                     } else if (std::strcmp(attendance.reason, "session_inactive") == 0) {
-                        face_display_show("NOT MARKED", attendance.name, "SESSION INACTIVE", nullptr);
+                        face_display_show("NOT MARKED", attendance.name, "SESSION INACTIVE", "CONTACT ADMIN");
                     } else if (std::strcmp(attendance.reason, "unknown") == 0 ||
                                std::strcmp(attendance.reason, "no_face") == 0) {
-                        face_display_show("NOT MARKED", "UNKNOWN FACE", "IMAGE UPLOADED", nullptr);
+                        face_display_show("NOT MARKED", "UNKNOWN FACE", "NOT RECOGNIZED", "PLEASE RETRY");
                     } else if (attendance.name[0] != '\0') {
-                        face_display_show("NOT MARKED", attendance.name, "DATABASE ERROR", nullptr);
+                        face_display_show("NOT MARKED", attendance.name, "DATABASE ERROR", "CHECK SERVER");
                     } else {
                         face_display_show("NOT MARKED", "IMAGE UPLOADED", "CHECK SERVER", nullptr);
                     }
                 } else {
                     failure_retry_after_us = esp_timer_get_time() +
                         static_cast<int64_t>(FACE_FAILURE_RETRY_SEC) * 1000000LL;
-                    ESP_LOGW(TAG, "Upload did not complete; retry in %d sec",
-                             FACE_FAILURE_RETRY_SEC);
-                    face_display_show("UPLOAD FAILED", "RETRY IN 5 SEC", "CHECK WIFI / SERVER", nullptr);
+                    ESP_LOGW(TAG, "Fast upload failed; retry scheduled");
+                    face_display_show("UPLOAD FAILED", "CHECK WIFI / SERVER", "RETRYING...", nullptr);
                 }
-                display_hold_until_us = esp_timer_get_time() + 5000000LL;
-                face_state_hold_until_us = display_hold_until_us;
-                next_preview_us = display_hold_until_us;
+
+                // Show the attendance status on OLED for 1.8 seconds so the student can read their name
+                vTaskDelay(pdMS_TO_TICKS(1800));
+
+                // Instantly switch back to "READY" - no cooldown, no wait-for-face-clear!
+                face_display_show("FACE ATTENDANCE", "READY", "NEXT STUDENT PLEASE", nullptr);
+
+                success_cooldown_until_us = esp_timer_get_time() + 1000000LL; // 1s minimal debounce
+                failure_retry_after_us = esp_timer_get_time() + 1000000LL;
+                display_hold_until_us = esp_timer_get_time() + 400000LL;
+                next_preview_us = esp_timer_get_time() + 400000LL;
+
                 status_report_us = esp_timer_get_time();
                 frames_since_report = 0;
                 face_hits_since_report = 0;
                 missing_frames_since_report = 0;
                 inference_time_total_us = 0;
-                if (!s_camera_ready || wifi_manager_recovery_requested()) {
-                    break;
-                }
             }
 
             const int64_t remaining_us = DETECTION_PERIOD_US -
@@ -796,8 +630,5 @@ extern "C" void app_main(void)
             if (remaining_us > 0) {
                 vTaskDelay(pdMS_TO_TICKS(static_cast<uint32_t>((remaining_us + 999) / 1000)));
             }
-        }
-
-        camera_stop();
     }
 }

@@ -28,12 +28,16 @@ export async function signInAdmin(username, password) {
     return result.admin;
 }
 
-export async function signInStudent(studentId) {
-    const result = await postLogin("/api/student/login", { student_id: studentId });
-    return result.student;
-}
-
 export async function signInStudentAccount(username, password) {
     const result = await postLogin("/api/student/account/login", { username, password });
     return result.student;
+}
+
+export async function singleSignIn(userId, post, password) {
+    const result = await postLogin("/api/auth/single-login", {
+        user_id: userId,
+        post: post,
+        password: password,
+    });
+    return result;
 }

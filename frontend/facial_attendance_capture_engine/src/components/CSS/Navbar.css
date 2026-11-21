@@ -1,37 +1,150 @@
-.navbar{
-    background-color: #ccd5ae;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    width: 100vw;
-    height: fit-content;
-    border-bottom: 1px #d4a373 solid;
+/* ===================================================================
+   F.A.C.E  –  Navbar
+   Earthy warm palette · Frosted glass sticky bar
+   =================================================================== */
 
+.navbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  min-height: 64px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 max(24px, calc((100vw - 1120px) / 2));
+  border-bottom: 1px solid var(--line);
+  background: rgba(233, 237, 201, 0.88);
+  backdrop-filter: blur(14px) saturate(1.5);
+  -webkit-backdrop-filter: blur(14px) saturate(1.5);
 }
 
-.navbar-btns{
-    display: flex;
-    background-color: #fefae0;
-    list-style: none;
-    justify-content: space-evenly;
-    width: 20%;
-    padding: 5px;
+/* ── Brand / Logo ─────────────────────────────────────────────────── */
+
+.navbar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
 }
 
-button{
-    background-color:#fefae0;
-    outline: none;
-    border: none;
-    padding: 5px;
-    transition : all 300ms ease-in;
-
+.brand-logo-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--light-bronze);
+  color: #2b2216;
+  box-shadow: 0 2px 6px rgba(185, 141, 94, 0.28);
 }
 
-button:hover{
-    background-color: #ccd5ae;
-    filter: drop-shadow(-5px 5px 5px #ccd5ae);
+.brand-name {
+  font-size: 1.12rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--ink);
 }
 
-.sign{
-    
+/* ── Center Links ─────────────────────────────────────────────────── */
+
+.navbar-center-links {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nav-link-btn {
+  min-height: 36px;
+  padding: 7px 15px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted-ink);
+  font-weight: 600;
+  font-size: 0.92rem;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.nav-link-btn:hover {
+  color: var(--ink);
+  background: rgba(204, 213, 174, 0.5);
+  border-color: rgba(204, 213, 174, 0.6);
+  transform: none;
+  box-shadow: none;
+}
+
+.nav-link-btn.active {
+  color: var(--ink);
+  background: var(--tea-green);
+  border-color: #bcc699;
+}
+
+/* ── Actions ──────────────────────────────────────────────────────── */
+
+.navbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.navbar-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 16px;
+  background: var(--cornsilk);
+  border: 1px solid var(--line);
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.nav-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #15803d;
+  box-shadow: 0 0 0 2px rgba(21, 128, 61, 0.25);
+}
+
+.navbar-signin-btn {
+  min-height: 38px;
+  padding: 8px 18px;
+  border-radius: 8px;
+  border: 1px solid #b98d5e;
+  background: var(--light-bronze);
+  color: #2b2216;
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: all 140ms ease;
+}
+
+.navbar-signin-btn:hover {
+  background: #e0b486;
+  border-color: #c59b6b;
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+/* ── Responsive ───────────────────────────────────────────────────── */
+
+@media (max-width: 640px) {
+  .navbar {
+    min-height: 56px;
+    padding: 0 14px;
+  }
+  .navbar-status-pill {
+    display: none;
+  }
+  .nav-link-btn {
+    padding: 6px 10px;
+    font-size: 0.85rem;
+  }
 }

@@ -1,8 +1,11 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiRequest, showMessage, showTable } from "../../services/faceApi";
 
 function Leaves() {
+    const [role, setRole] = useState("");
+    const canRequest = role === "student" || role === "parent";
+    const canReview = ["admin", "hod", "teacher", "reviewer"].includes(role);
     async function loadLeaves() {
         try {
             let result = await apiRequest("/api/leaves");
@@ -51,6 +54,7 @@ function Leaves() {
     }
 
     useEffect(function () {
+        apiRequest("/api/me").then((account) => setRole(account.role));
         loadLeaves();
     }, []);
 
@@ -58,7 +62,7 @@ function Leaves() {
         <div>
             <h1>Leave Requests</h1>
             <p><Link to="/Dashboard/Admin">Back to dashboard</Link></p>
-            <section>
+            {canRequest && <section>
                 <h2>Request leave</h2>
                 <form onSubmit={sendRequest}>
                     <label>From <input type="date" name="start_date" required /></label>
@@ -67,14 +71,14 @@ function Leaves() {
                     <button type="submit">Send request</button>
                 </form>
                 <p id="leave-form-message" role="status"></p>
-            </section>
+            </section>}
             <section>
                 <h2>Requests</h2>
                 <button type="button" onClick={loadLeaves}>Refresh requests</button>
                 <p id="leaves-message" role="status"></p>
                 <div id="leaves-table"></div>
             </section>
-            <section>
+            {canReview && <section>
                 <h2>Review a request</h2>
                 <form onSubmit={reviewRequest}>
                     <label>Request ID <input type="number" name="request_id" required /></label>
@@ -88,7 +92,7 @@ function Leaves() {
                     <button type="submit">Save decision</button>
                 </form>
                 <p id="leave-review-message" role="status"></p>
-            </section>
+            </section>}
         </div>
     );
 }

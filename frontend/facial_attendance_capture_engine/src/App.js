@@ -16,6 +16,9 @@ import Leaves from "./components/Management/Leaves";
 import Holidays from "./components/Management/Holidays";
 import Notifications from "./components/Management/Notifications";
 import ForgotPassword from "./components/Management/ForgotPassword";
+import ProtectedRoute from "./components/ProtectedRoute";
+import StaffDashboard from "./components/Dashboard/Staff";
+import RegisterCandidate from "./components/RegisterCandidate";
 
 
 
@@ -29,17 +32,19 @@ function App() {
         <Route path="StaffSign" element={<StaffSign />} />
         <Route path="StudentSign" element={<StudentSign />} />
         <Route path="About" element={<About />} />
-        <Route path= "Dashboard/Admin" element={<Admin />} />
-        <Route path="Dashboard/Student" element={<Student />} />
-        <Route path="StudentReg" element={<StudentReg />} />
+        <Route path="Dashboard/Admin" element={<ProtectedRoute allowedRoles={["admin"]}><Admin /></ProtectedRoute>} />
+        <Route path="Dashboard/Staff" element={<ProtectedRoute allowedRoles={["hod", "teacher", "staff", "reviewer"]}><StaffDashboard /></ProtectedRoute>} />
+        <Route path="Dashboard/Student" element={<ProtectedRoute allowedRoles={["student", "parent"]}><Student /></ProtectedRoute>} />
+        <Route path="StudentReg" element={<ProtectedRoute allowedRoles={["admin", "hod", "staff"]}><StudentReg /></ProtectedRoute>} />
+        <Route path="RegisterCandidate" element={<ProtectedRoute allowedRoles={["admin", "hod", "staff"]}><RegisterCandidate /></ProtectedRoute>} />
         <Route path="ForgotPassword" element={<ForgotPassword />} />
-        <Route path="Dashboard/Attendance" element={<Attendance />} />
-        <Route path="Dashboard/Reports" element={<Reports />} />
-        <Route path="Dashboard/Students" element={<Students />} />
-        <Route path="Dashboard/Users" element={<Users />} />
-        <Route path="Dashboard/Leaves" element={<Leaves />} />
-        <Route path="Dashboard/Holidays" element={<Holidays />} />
-        <Route path="Dashboard/Notifications" element={<Notifications />} />
+        <Route path="Dashboard/Attendance" element={<ProtectedRoute allowedRoles={["admin", "hod", "staff", "teacher", "reviewer"]}><Attendance /></ProtectedRoute>} />
+        <Route path="Dashboard/Reports" element={<ProtectedRoute allowedRoles={["admin", "hod", "staff", "teacher", "reviewer", "student", "parent"]}><Reports /></ProtectedRoute>} />
+        <Route path="Dashboard/Students" element={<ProtectedRoute allowedRoles={["admin", "hod", "staff", "teacher", "reviewer"]}><Students /></ProtectedRoute>} />
+        <Route path="Dashboard/Users" element={<ProtectedRoute allowedRoles={["admin"]}><Users /></ProtectedRoute>} />
+        <Route path="Dashboard/Leaves" element={<ProtectedRoute allowedRoles={["admin", "hod", "staff", "teacher", "reviewer", "student"]}><Leaves /></ProtectedRoute>} />
+        <Route path="Dashboard/Holidays" element={<ProtectedRoute allowedRoles={["admin", "hod", "staff", "teacher", "reviewer", "student", "parent"]}><Holidays /></ProtectedRoute>} />
+        <Route path="Dashboard/Notifications" element={<ProtectedRoute allowedRoles={["admin", "hod", "staff", "teacher", "reviewer", "student", "parent"]}><Notifications /></ProtectedRoute>} />
        
       </Route>
       </Routes>

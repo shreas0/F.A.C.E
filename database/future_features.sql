@@ -13,8 +13,12 @@ CREATE TABLE IF NOT EXISTS roles (
 
 INSERT IGNORE INTO roles (name, description) VALUES
     ('admin', 'System administrator'),
+    ('hod', 'School-wide attendance and leave oversight'),
+    ('teacher', 'Attendance access for assigned class'),
+    ('staff', 'Daily attendance and enrollment operations'),
     ('reviewer', 'Reviews student leave requests'),
-    ('student', 'Student account');
+    ('student', 'Student account'),
+    ('parent', 'Parent or guardian account');
 
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -28,6 +32,10 @@ CREATE TABLE IF NOT EXISTS users (
     FOREIGN KEY (role_id) REFERENCES roles(id),
     FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
+
+-- Use this simple class assignment for teachers to keep their student and
+-- attendance views limited to the class they teach.
+ALTER TABLE users ADD COLUMN class_name VARCHAR(100) NULL;
 
 INSERT IGNORE INTO users (username, email, password_hash, role_id)
 SELECT admins.username, CONCAT(admins.username, '@face.local'), admins.password_hash, roles.id

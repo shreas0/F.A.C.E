@@ -60,6 +60,7 @@ function Admin() {
             </section>
             <nav aria-label="Attendance management pages">
                 <ul>
+                    <li><Link to="/RegisterCandidate">+ Register New Candidate (Any Role)</Link></li>
                     <li><Link to="/Dashboard/Attendance">Attendance records</Link></li>
                     <li><Link to="/Dashboard/Reports">Attendance report</Link></li>
                     <li><Link to="/Dashboard/Students">Student list</Link></li>

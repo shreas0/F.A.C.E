@@ -458,7 +458,6 @@ void wifi_event_callback(void *, esp_event_base_t event_base, int32_t event_id,
         s_wifi_stopping.store(false);
         s_wifi_retry_count.store(0);
         const esp_err_t err = esp_wifi_connect();
-        face_display_show("CONNECTING WIFI", "LOOKING FOR AP...", nullptr, nullptr);
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "Initial esp_wifi_connect failed: %s", esp_err_to_name(err));
             s_connection_failed.store(true);
@@ -480,12 +479,7 @@ void wifi_event_callback(void *, esp_event_base_t event_base, int32_t event_id,
         ESP_LOGW(TAG, "Wi-Fi disconnected (reason=%u: %s), retry %d/%d%s",
                  static_cast<unsigned>(reason), disconnect_reason_hint(reason), attempt,
                  WIFI_RETRY_LIMIT, had_ip ? " after IP acquisition" : "");
-        face_display_show("WIFI DISCONNECTED", "RETRYING...", nullptr, nullptr);
         if (attempt <= WIFI_RETRY_LIMIT) {
-            char retry_line[32];
-            std::snprintf(retry_line, sizeof(retry_line), "RETRY %d OF %d",
-                          attempt, WIFI_RETRY_LIMIT);
-            face_display_show("WIFI DISCONNECTED", retry_line, nullptr, nullptr);
             const esp_err_t err = esp_wifi_connect();
             if (err == ESP_OK) {
                 return;
@@ -495,7 +489,6 @@ void wifi_event_callback(void *, esp_event_base_t event_base, int32_t event_id,
 
         s_connection_failed.store(true);
         xEventGroupSetBits(s_wifi_events, WIFI_FAILED_BIT);
-        face_display_show("WIFI FAILED", "CHECK ROUTER", nullptr, nullptr);
         return;
     }
 
@@ -509,13 +502,8 @@ void wifi_event_callback(void *, esp_event_base_t event_base, int32_t event_id,
         if (event) {
             ESP_LOGI(TAG, "DHCP assigned IP " IPSTR ", gateway " IPSTR,
                      IP2STR(&event->ip_info.ip), IP2STR(&event->ip_info.gw));
-            char ip_line[22];
-            std::snprintf(ip_line, sizeof(ip_line), "IP " IPSTR,
-                          IP2STR(&event->ip_info.ip));
-            face_display_show("WIFI CONNECTED", ip_line, "GETTING NETWORK TIME", nullptr);
         } else {
             ESP_LOGI(TAG, "Wi-Fi acquired an IP address");
-            face_display_show("WIFI CONNECTED", "GETTING NETWORK TIME", nullptr, nullptr);
         }
     }
 }
@@ -611,7 +599,10 @@ bool wifi_manager_connect()
     if (!s_wifi_initialized.load() || !s_wifi_events) {
         return false;
     }
-    face_display_show("CONNECTING WIFI", "WAITING FOR AP...", nullptr, nullptr);
+    // If already connected and have an IP, avoid redundant reconnection delays
+    if (s_wifi_had_ip.load() && !s_connection_failed.load()) {
+        return true;
+    }
 
     wifi_config_t config{};
     std::memcpy(config.sta.ssid, s_credentials.ssid, s_credentials.ssid_len);
@@ -633,30 +624,27 @@ bool wifi_manager_connect()
     if (err == ESP_OK) {
         err = esp_wifi_start();
     }
-    if (err != ESP_OK) {
+    if (err != ESP_OK && err != ESP_ERR_WIFI_STATE) {
         ESP_LOGE(TAG, "Could not start station mode: %s", esp_err_to_name(err));
         s_connection_failed.store(true);
-        wifi_manager_stop();
         return false;
     }
 
     ESP_LOGI(TAG, "Connecting to configured 2.4 GHz Wi-Fi network (SSID hidden)");
     const EventBits_t bits = xEventGroupWaitBits(
         s_wifi_events, WIFI_CONNECTED_BIT | WIFI_FAILED_BIT, pdTRUE, pdFALSE,
-        pdMS_TO_TICKS(FACE_WIFI_CONNECT_TIMEOUT_MS));
+        pdMS_TO_TICKS(3500));
     if (bits & WIFI_CONNECTED_BIT) {
         s_connection_failed.store(false);
         return true;
     }
 
     if (bits & WIFI_FAILED_BIT) {
-        ESP_LOGE(TAG, "Wi-Fi retries exhausted before DHCP assigned an address");
+        ESP_LOGW(TAG, "Wi-Fi retries exhausted before DHCP assigned an address");
     } else {
-        ESP_LOGE(TAG, "Timed out waiting for IP_EVENT_STA_GOT_IP after %d ms",
-                 FACE_WIFI_CONNECT_TIMEOUT_MS);
+        ESP_LOGW(TAG, "Timed out waiting for Wi-Fi IP after 3500 ms");
     }
     s_connection_failed.store(true);
-    wifi_manager_stop();
     return false;
 }
 

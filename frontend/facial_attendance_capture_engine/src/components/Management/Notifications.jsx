@@ -1,8 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiRequest, showMessage, showTable } from "../../services/faceApi";
 
 function Notifications() {
+    const [role, setRole] = useState("");
+    const canSend = ["admin", "hod", "staff"].includes(role);
     async function loadNotifications() {
         let unread = document.getElementById("unread-only").checked;
         try {
@@ -49,6 +51,7 @@ function Notifications() {
     }
 
     useEffect(function () {
+        apiRequest("/api/me").then((account) => setRole(account.role));
         loadNotifications();
     }, []);
 
@@ -68,7 +71,7 @@ function Notifications() {
                 </form>
                 <p id="notification-read-message" role="status"></p>
             </section>
-            <section>
+            {canSend && <section>
                 <h2>Send an in-app notification</h2>
                 <form onSubmit={sendNotification}>
                     <label>User ID <input type="number" name="user_id" required /></label>
@@ -83,7 +86,7 @@ function Notifications() {
                     <button type="submit">Save notification</button>
                 </form>
                 <p id="notification-form-message" role="status"></p>
-            </section>
+            </section>}
         </div>
     );
 }

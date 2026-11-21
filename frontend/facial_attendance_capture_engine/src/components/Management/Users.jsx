@@ -8,9 +8,9 @@ function Users() {
             let result = await apiRequest("/api/users");
             let rows = [];
             for (let user of result.users) {
-                rows.push([user.id, user.username, user.email, user.role, user.student_id, user.active ? "Active" : "Inactive"]);
+                rows.push([user.id, user.username, user.email, user.role, user.class_name || "—", user.student_id || "—", user.active ? "Active" : "Inactive"]);
             }
-            showTable("users-table", ["ID", "Username", "Email", "Role", "Student ID", "Status"], rows);
+            showTable("users-table", ["ID", "Username", "Email", "Role", "Class", "Student ID", "Status"], rows);
             showMessage("users-message", `${rows.length} user(s) found.`);
         } catch (error) {
             showMessage("users-message", error.message);
@@ -27,6 +27,7 @@ function Users() {
             password: form.elements.password.value,
             role: form.elements.role.value,
             student_id: studentId ? Number(studentId) : null,
+            class_name: form.elements.class_name.value.trim() || null,
         };
         try {
             let result = await apiRequest("/api/users", { method: "POST", body: data });
@@ -55,11 +56,16 @@ function Users() {
                     <label>Role
                         <select name="role">
                             <option value="student">Student</option>
-                            <option value="reviewer">Reviewer</option>
+                            <option value="parent">Parent</option>
+                            <option value="hod">Head of Department</option>
+                            <option value="teacher">Teacher</option>
+                            <option value="staff">Staff</option>
+                            <option value="reviewer">Leave reviewer</option>
                             <option value="admin">Admin</option>
                         </select>
                     </label>
-                    <label>Student record ID (student account only) <input type="number" name="student_id" /></label>
+                    <label>Assigned class (required for teachers) <input type="text" name="class_name" /></label>
+                    <label>Linked student record ID (student/parent) <input type="number" name="student_id" /></label>
                     <button type="submit">Create user</button>
                 </form>
                 <p id="user-form-message" role="status"></p>
